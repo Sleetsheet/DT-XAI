@@ -10,6 +10,7 @@ import hashlib
 import html
 import os
 from pathlib import Path
+import shutil
 import threading
 import time
 
@@ -65,6 +66,21 @@ def inject_style():
     [data-testid="stButton"] button[kind="secondary"] {background:#F5F2E9;border-color:#DDD9CB;color:#406248;box-shadow:3px 3px 6px #ddd8cb,-3px -3px 6px #fff9;}
     [data-testid="stButton"] button[kind="primary"],[data-testid="stFormSubmitButton"] button[kind="primary"] {background:#174D3F;border-color:#174D3F;color:#F5F3E8;}
     [data-testid="stTextInput"] input {border-radius:7px;}
+    :root {color-scheme:light;}
+    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"] {background:#F3F0E8!important;color:#29352F!important;}
+    .stApp label,.stApp label *,[data-testid="stWidgetLabel"] *,[data-testid="stSidebar"] [role="radiogroup"] label *,[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMain"] [data-testid="stMarkdownContainer"] p,[data-testid="stMain"] [data-testid="stMarkdownContainer"] li,[data-testid="stExpander"] summary *,
+    [data-testid="stTabs"] button *,[data-testid="stCheckbox"] *,[data-testid="stSlider"] * {color:#29352F!important;}
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"],[data-testid="stSidebar"] [data-testid="stCaptionContainer"] * {color:#6F7466!important;}
+    [data-testid="stAlertContainer"] {background:#E4EBDF!important;border:1px solid #CBD6C3;}
+    [data-testid="stAlertContainer"],[data-testid="stAlertContainer"] * {color:#29352F!important;}
+    [data-baseweb="input"],[data-baseweb="input"] input,[data-baseweb="select"]>div,[data-baseweb="textarea"],[data-baseweb="textarea"] textarea {background:#FBF8F1!important;color:#29352F!important;}
+    [data-baseweb="popover"] [data-baseweb="menu"],[data-baseweb="popover"] li {background:#FBF8F1!important;color:#29352F!important;}
+    [data-testid="stFileUploaderDropzone"] {background:#FBF8F1!important;border:1px dashed #BFC8B6;}
+    [data-testid="stFileUploaderDropzone"] * {color:#29352F!important;}
+    label[data-baseweb="radio"]>div:first-child {background:#FBF8F1!important;border-color:#174D3F!important;}
+    label[data-baseweb="radio"]:has(input:checked)>div:first-child {background:#174D3F!important;}
+    [data-testid="stSidebar"] [data-testid="stButton"] button {color:#29352F!important;}
     .eyebrow {font-family:VerdantSans,Arial,sans-serif;font-size:10px;letter-spacing:.17em;text-transform:uppercase;color:#8A8E7E;margin-bottom:8px;}
     [class*="st-key-card_"] {background:#F8F5ED!important;border:1px solid #FFFFFFAA!important;border-radius:14px!important;box-shadow:6px 6px 18px #d8d3c766,-5px -5px 15px #ffffff99;}
     [data-testid="stMarkdownContainer"] p,[data-testid="stMarkdownContainer"] li,[data-testid="stCaptionContainer"],label,button,input {font-family:VerdantSans,Arial,sans-serif!important;}
@@ -90,6 +106,9 @@ def inject_style():
     .login-panel h1 {font-size:58px;line-height:1.08;color:#EBEBD8;margin:80px 0 25px;}
     .login-panel p {color:#AABD9A;font-size:13px;line-height:1.9;}
     .login-panel .brand {color:#DCE7CE;}
+    .stApp .dark-card,.stApp .dark-card p,.stApp .login-panel p {color:inherit!important;}
+    .stApp .dark-card p {color:#BAC9AE!important;} .stApp .login-panel p {color:#AABD9A!important;}
+    .stApp .dark-card h2,.stApp .login-panel h1 {color:#EFF1DA!important;} .stApp .dark-card h2 em {color:#B3C6A8!important;}
     [data-testid="stCaptionContainer"] {color:#8B927D;font-size:11px;}
     [data-testid="stDataFrame"] {border-radius:8px;}
     @media(max-width:700px){.block-container{padding-left:1rem;padding-right:1rem;}.hero h1{font-size:43px}.login-panel{min-height:280px;padding:30px}.login-panel h1{font-size:40px;margin-top:35px}.dark-card h2{font-size:35px}.workspace-footer{font-size:7px}}
@@ -108,6 +127,38 @@ def section(eyebrow, title):
 
 def note(text):
     st.markdown(f'<div class="note">{esc(text)}</div>', unsafe_allow_html=True)
+
+
+UPLOAD_PATH = sec.STATE / 'uploaded_data.csv'
+
+
+def active_data_path():
+    """An uploaded CSV wins; otherwise DATA_PATH, otherwise data.csv beside app.py."""
+    if UPLOAD_PATH.is_file():
+        return UPLOAD_PATH
+    return Path(os.getenv('DATA_PATH', str(ROOT / 'data.csv')))
+
+
+def upload_widget(key, label='Upload your Edge-IIoTset CSV'):
+    """Save an uploaded CSV to private app storage after checking its header."""
+    uploaded = st.file_uploader(label, type=['csv'], key='upload_' + key,
+                                help='Needs the Attack_label and Attack_type columns. A stratified sample (see make_sample.py) works well.')
+    if uploaded is not None and st.button('Use this dataset', key='use_' + key, type='primary'):
+        sec.STATE.mkdir(parents=True, exist_ok=True)
+        tmp = UPLOAD_PATH.with_suffix('.part')
+        try:
+            with open(tmp, 'wb') as out:
+                shutil.copyfileobj(uploaded, out, 1024 * 1024)
+            header = pd.read_csv(tmp, nrows=0)
+            missing = set(pipe.TARGETS) - set(header.columns.str.strip())
+            if missing:
+                raise ValueError('Missing required columns: ' + ', '.join(sorted(missing)))
+            os.replace(tmp, UPLOAD_PATH)
+        except (ValueError, OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
+            tmp.unlink(missing_ok=True)
+            st.error(f'That file could not be used: {exc}')
+            return
+        st.rerun()
 
 
 def login():
@@ -556,9 +607,10 @@ def main():
             sec.logout();st.rerun()
     if page=='Security monitor':
         security_page();return
-    path=Path(os.getenv('DATA_PATH',str(ROOT/'data.csv')))
+    path=active_data_path()
     if not path.is_file():
-        st.info('Your workspace is ready for its data. Place the real Edge-IIoTset ML CSV beside app.py as data.csv, or set DATA_PATH. Security Monitor works independently.')
+        st.info('Your workspace is ready for its data. Upload the Edge-IIoTset ML CSV below, or place it beside app.py as data.csv / set DATA_PATH. Security Monitor works independently.')
+        upload_widget('main')
         if page=='Overview':overview()
         else:heading('REAL DATA REQUIRED','Evidence comes first.','This view will populate once your real CSV is available. No synthetic data is substituted.')
         return
@@ -570,7 +622,12 @@ def main():
         if len(attacks)<2 or 'Normal' not in clean.Attack_type.unique():raise ValueError('Normal and at least two attack families must remain after cleaning.')
         fingerprint=file_identity(str(path),signature)
         with st.sidebar:
-            st.divider();st.caption('ACTIVE HOLDOUT')
+            st.divider()
+            with st.expander('Replace dataset'):
+                upload_widget('side','Upload a different CSV')
+                if UPLOAD_PATH.is_file() and st.button('Remove uploaded CSV',key='remove_upload'):
+                    UPLOAD_PATH.unlink(missing_ok=True);st.rerun()
+            st.caption('ACTIVE HOLDOUT')
             holdout=st.selectbox('Attack family excluded from training',attacks,index=attacks.index('SQL_injection') if 'SQL_injection' in attacks else 0,key='holdout')
             st.caption(f'{len(clean):,} clean records · seed 42\n\n75 / 25 known-class split · up to 12 features')
             st.caption('Data SHA-256: '+fingerprint[:12])
